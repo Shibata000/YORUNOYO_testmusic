@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>音楽の自動再生ページ</title>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            background-color: #f0f8ff;
+            color: #333;
+            margin: 0;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            height: 100vh;
+            padding-top: 20px;
+        }
+
+        .container {
+            text-align: center;
+            background-color: #fff;
+            padding: 20px;
+            border-radius: 15px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        h1 {
+            font-size: 24px;
+            color: #000080;
+            margin-bottom: 20px;
+        }
+
+        p {
+            font-size: 18px;
+            margin: 10px 0;
+        }
+
+        #currentTrack {
+            font-weight: bold;
+            color: #ff4500;
+        }
+
+        #countdown {
+            font-size: 18px;
+            margin-top: 10px;
+            color: #000080;
+        }
+
+        #error {
+            color: red;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>音楽の自動再生ページ</h1>
+        <p>毎時、00/10/20/30/40/50分に音楽再生されます</p>
+        <p>現在の時間 : <span id="currentTime">取得中...</span><br>
+        次の再生開始まで : <span id="countdown">--:--:--</span></p>
+        <p>現在再生中の楽曲 : <span id="currentTrack">なし</span></p>
+        <p id="error">時刻の取得に失敗しました。再度ページをリロードしてください。</p>
+    </div>
+
+    <script>
+        let lastPlayedMinute = -1;
+        let correctedDate; // APIから取得した正しい時間
+        let timeOffset = 0; // システム時刻とAPI時刻の差分
+        const audioA = new Audio('audio/a.mp3'); // A楽曲
+        const A_TRACK_DURATION = 4 * 60 + 50; // A楽曲の長さ（4分50秒）
+        const INTERVAL_DURATION = 10 * 60; // 再生間隔（10分）
+
+        // 音楽ファイルのプリロード
+        audioA.preload = 'auto';
+        audioA.load();
+
+        // 時刻をAPIから取得して補正
+        function fetchCorrectedTime() {
+            return fetch('https://worldtimeapi.org/api/ip')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Network response was not ok');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    correctedDate = new Date(data.datetime); // APIからのUTC時間
+                    const now = Date.now();
+                    timeOffset = correctedDate.getTime() - now; // システム時刻との差分を計算
+                    updateCorrectedTime();
+                })
+                .catch(error => {
+                    console.error('時刻の取得に失敗しました:', error);
+                    document.getElementById('error').style.display = 'block'; // エラーメッセージを表示
+                });
+        }
+
+        // 補正された時間を表示およびカウントダウンを更新
+        function updateCorrectedTime() {
+            const now = new Date(Date.now() + timeOffset); // システム時刻に差分を加味
+            const hours = String(now.getHours()).padStart(2, '0');
+            const minutes = String(now.getMinutes()).padStart(2, '0');
+            const seconds = String(now.getSeconds()).padStart(2, '0');
+            document.getElementById('currentTime').textContent = `${hours}:${minutes}:${seconds}`;
+
+            checkTimeAndPlayMusic(now); // 時刻に基づき音楽再生を確認
+            requestAnimationFrame(updateCorrectedTime); // 次のフレームで再び時間更新
+        }
+
+        // 現在の時刻に合わせた楽曲の再生
+        function checkTimeAndPlayMusic(now) {
+            const minutes = now.getMinutes();
+            const seconds = now.getSeconds();
+            const totalSeconds = minutes * 60 + seconds; // 現在の時間を秒で取得
+
+            const nearestIntervalStart = Math.floor(totalSeconds / INTERVAL_DURATION) * INTERVAL_DURATION; // 10分単位の開始時刻
+            const timeSinceIntervalStart = totalSeconds - nearestIntervalStart; // 最も近い10分区切りから経過した時間
+
+            // 次の再生開始までのカウントダウン
+            const timeToNextPlay = INTERVAL_DURATION - timeSinceIntervalStart;
+            const minutesToNextPlay = Math.floor(timeToNextPlay / 60);
+            const secondsToNextPlay = timeToNextPlay % 60;
+            document.getElementById('countdown').textContent = `${String(minutesToNextPlay).padStart(2, '0')}:${String(secondsToNextPlay).padStart(2, '0')}`;
+
+            // A楽曲の再生処理
+            if (timeSinceIntervalStart < A_TRACK_DURATION) {
+                if (!audioA.paused) {
+                    return; // すでに再生中なら何もしない
+                }
+                audioA.currentTime = timeSinceIntervalStart; // 現在の時間に応じて楽曲の再生位置を調整
+                audioA.play();
+                document.getElementById('currentTrack').textContent = "再生中";
+            } else {
+                // 無音時には何もしない（音楽は再生しない）
+                if (!audioA.paused) {
+                    audioA.pause(); // もしA楽曲が再生中であれば停止
+                    document.getElementById('currentTrack').textContent = "なし";
+                }
+            }
+
+            lastPlayedMinute = nearestIntervalStart;
+        }
+
+        // A曲が終了した際の処理
+        audioA.addEventListener('ended', () => {
+            document.getElementById('currentTrack').textContent = "なし";
+        });
+
+        // 音楽再生を開始
+        function startMusic() {
+            updateCorrectedTime(); // 時刻を表示し、音楽再生を管理
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            // ページが読み込まれたときに確認ダイアログを表示
+            if (window.confirm('音楽再生を開始しますか？')) {
+                fetchCorrectedTime().then(() => {
+                    startMusic(); // OKを押したら音楽再生開始
+                });
+            }
+        });
+    </script>
+</body>
+</html>
